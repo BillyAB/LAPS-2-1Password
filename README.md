@@ -34,7 +34,34 @@ The script manages these items completely, so any manual edit to one is overwrit
 
    Password history exists in AD only when password encryption is enabled. That is a Windows LAPS limitation.
 
-## Setup
+## Automated setup (gMSA or service account)
+
+`Install-LapsTo1Password.ps1` sets everything up in one go. Run it elevated on the sync server, with `Sync-LapsTo1Password.ps1` in the same folder:
+
+```powershell
+.\Install-LapsTo1Password.ps1 -ServiceAccount 'CORP\gmsa-laps1p$' -VaultName 'LAPS - Servers' `
+    -SearchBase 'OU=Servers,DC=corp,DC=example,DC=com' -ArchiveOrphans
+```
+
+It does the following:
+
+1. Checks the gMSA is usable on this server, using `Test-ADServiceAccount`.
+2. Grants the account Modify on `C:\ProgramData\LapsTo1Password`.
+3. Prompts for the 1Password token and writes it to a staging file that only the account, SYSTEM and Administrators can read.
+4. Runs a one-off task as the account that calls `Sync-LapsTo1Password.ps1 -SaveToken -TokenFile`, so the token is DPAPI-encrypted for that account.
+5. Deletes the one-off task and the staging file.
+6. Registers or updates the recurring sync task, every 30 minutes by default (`-IntervalMinutes`).
+
+An account name ending in `$` is treated as a gMSA. For any other name you are prompted for the account's password.
+
+Other ways to run it:
+- `-ExtraArguments '-WhatIf' -StartTask`: a dry run. Run it again without them to go live.
+- `-TokenOnly`: rotate the token without changing the task.
+- `-SkipToken`: change the task's settings without re-entering the token.
+
+The script does not grant the AD and LAPS rights listed under [Prerequisites](#prerequisites), or **Log on as a batch job**.
+
+## Manual setup
 
 ### 1. Save the service account token
 
@@ -50,7 +77,7 @@ This writes `C:\ProgramData\LapsTo1Password\op-token.xml` and restricts its ACL 
 
 The script also uses `OP_SERVICE_ACCOUNT_TOKEN` if that environment variable is already set, for example when the token comes from a secrets store.
 
-> **gMSA note:** a gMSA can run the task but cannot sign in interactively to run `-SaveToken`. To use a gMSA, register a one-off task that runs as the gMSA and calls `-SaveToken`, or supply the token through `OP_SERVICE_ACCOUNT_TOKEN`. A standard service account is the simpler option.
+> **gMSA note:** a gMSA cannot sign in interactively to run `-SaveToken`. Use `Install-LapsTo1Password.ps1` instead (see [Automated setup](#automated-setup-gmsa-or-service-account)), which saves the token through a one-off scheduled task that runs as the gMSA.
 
 ### 2. Do a dry run
 

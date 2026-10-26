@@ -62,6 +62,10 @@
     Prompt for the 1Password service account token and save it, encrypted with DPAPI, to
     -TokenPath. Run this once, as the account that will run the scheduled task.
 
+.PARAMETER TokenFile
+    With -SaveToken, read the token from this file instead of prompting. Used when saving the token
+    from a non-interactive scheduled task, for example as a gMSA. See Install-LapsTo1Password.ps1.
+
 .EXAMPLE
     .\Sync-LapsTo1Password.ps1 -SaveToken
 
@@ -116,7 +120,10 @@ param(
     [string]$TokenPath = (Join-Path $env:ProgramData 'LapsTo1Password\op-token.xml'),
 
     [Parameter(Mandatory, ParameterSetName = 'SaveToken')]
-    [switch]$SaveToken
+    [switch]$SaveToken,
+
+    [Parameter(ParameterSetName = 'SaveToken')]
+    [string]$TokenFile
 )
 
 $ErrorActionPreference = 'Stop'
@@ -427,7 +434,12 @@ function New-ItemJson {
 #region Save token
 
 if ($SaveToken) {
-    $secure = Read-Host -AsSecureString -Prompt 'Paste the 1Password service account token'
+    if ($TokenFile) {
+        $secure = ConvertTo-SecureString ([System.IO.File]::ReadAllText($TokenFile).Trim()) -AsPlainText -Force
+    }
+    else {
+        $secure = Read-Host -AsSecureString -Prompt 'Paste the 1Password service account token'
+    }
     if ($secure.Length -eq 0) { throw 'No token entered.' }
     $directory = Split-Path -Parent $TokenPath
     if (-not (Test-Path -LiteralPath $directory)) { New-Item -ItemType Directory -Path $directory -Force | Out-Null }
