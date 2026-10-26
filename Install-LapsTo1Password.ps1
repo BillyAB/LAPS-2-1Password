@@ -177,17 +177,61 @@ function Register-AccountTask {
     Register-ScheduledTask @taskParameters | Out-Null
 }
 
-function Wait-ScheduledTask {
-    param([Parameter(Mandatory)][string]$Name, [Parameter(Mandatory)][datetime]$StartedAfter, [int]$TimeoutSeconds = 120)
-    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
-    while ((Get-Date) -lt $deadline) {
-        Start-Sleep -Seconds 2
-        $info = Get-ScheduledTaskInfo -TaskName $Name
-        if ((Get-ScheduledTask -TaskName $Name).State -ne 'Running' -and $info.LastRunTime -ge $StartedAfter) {
-            return $info.LastTaskResult
-        }
+function Get-TaskResultHint {
+    param([long]$Result)
+    switch ($Result) {
+        0x41301 { 'The task is still running.' }
+        0x41303 { 'The task has not run. Task Scheduler could not start it, usually because the account cannot log on. See the events below.' }
+        0x80070569L { "$ServiceAccount does not have 'Log on as a batch job' on this server." }
+        0x8007052EL { "Logon failure for $ServiceAccount. For a gMSA, check Test-ADServiceAccount and that $env:COMPUTERNAME may retrieve its password." }
+        0x80070005L { "Access denied. Check $ServiceAccount can read '$ScriptPath' and its folder." }
+        default { '' }
     }
-    throw "Task '$Name' did not finish within $TimeoutSeconds seconds."
+}
+
+# Returns Task Scheduler's events for the task since it was started. The Operational log must be
+# enabled ("Enable All Tasks History" in Task Scheduler) for these to exist.
+function Get-TaskEvents {
+    param([Parameter(Mandatory)][string]$Name, [Parameter(Mandatory)][datetime]$StartedAfter)
+    $filter = @{ LogName = 'Microsoft-Windows-TaskScheduler/Operational'; StartTime = $StartedAfter }
+    Get-WinEvent -FilterHashtable $filter -ErrorAction SilentlyContinue |
+        Where-Object { $_.Message -like "*$Name*" } |
+        Sort-Object TimeCreated |
+        ForEach-Object { '  {0:HH:mm:ss} [{1}] {2}' -f $_.TimeCreated, $_.Id, ($_.Message -replace '\s+', ' ') }
+}
+
+# Waits for the one-off task to write the token file. Success is judged by the file rather than
+# the task's LastRunTime, which is not updated when the task fails to launch.
+function Wait-TokenSaved {
+    param(
+        [Parameter(Mandatory)][string]$Name,
+        [Parameter(Mandatory)][datetime]$StartedAfter,
+        [datetime]$PreviousWriteTime = [datetime]::MinValue,
+        [int]$TimeoutSeconds = 300
+    )
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    do {
+        Start-Sleep -Seconds 2
+        if ((Test-Path -LiteralPath $TokenPath) -and (Get-Item -LiteralPath $TokenPath).LastWriteTime -gt $PreviousWriteTime) {
+            # Let the task exit before the caller unregisters it.
+            $stopBy = (Get-Date).AddSeconds(30)
+            while ((Get-ScheduledTask -TaskName $Name).State -eq 'Running' -and (Get-Date) -lt $stopBy) { Start-Sleep -Seconds 1 }
+            return
+        }
+        $state = (Get-ScheduledTask -TaskName $Name).State
+        $info = Get-ScheduledTaskInfo -TaskName $Name
+        $finished = $state -ne 'Running' -and $info.LastRunTime -ge $StartedAfter -and $info.LastTaskResult -notin 0x41301, 0x41303
+    } until ($finished -or (Get-Date) -ge $deadline)
+
+    $reason = if ($finished) { 'finished without saving the token' } else { "did not save the token within $TimeoutSeconds seconds" }
+    $details = @(
+        "The one-off task $reason."
+        ('  State: {0}; last run: {1}; last result: 0x{2:X8} {3}' -f $state, $info.LastRunTime, $info.LastTaskResult, (Get-TaskResultHint $info.LastTaskResult))
+    )
+    $events = @(Get-TaskEvents -Name $Name -StartedAfter $StartedAfter)
+    if ($events) { $details += '  Task Scheduler events:'; $details += $events }
+    else { $details += '  No Task Scheduler events found. Enable "All Tasks History" in Task Scheduler to capture them.' }
+    throw ($details -join [Environment]::NewLine)
 }
 
 #region Checks
@@ -250,13 +294,10 @@ if (-not $SkipToken) {
             -Argument "-NoProfile -NonInteractive -ExecutionPolicy Bypass -Command `"$saveCommand`""
         Register-AccountTask -Name $saveTaskName -Action $saveAction
 
+        $previousWriteTime = if (Test-Path -LiteralPath $TokenPath) { (Get-Item -LiteralPath $TokenPath).LastWriteTime } else { [datetime]::MinValue }
         $startedAt = (Get-Date).AddSeconds(-2)
         Start-ScheduledTask -TaskName $saveTaskName
-        $result = Wait-ScheduledTask -Name $saveTaskName -StartedAfter $startedAt
-        if ($result -ne 0) {
-            throw ("The one-off task failed with result 0x{0:X8}. Check that $ServiceAccount has 'Log on as a batch job' on this server and can read '$ScriptPath'." -f $result)
-        }
-        if (-not (Test-Path -LiteralPath $TokenPath)) { throw "The one-off task finished but '$TokenPath' was not created." }
+        Wait-TokenSaved -Name $saveTaskName -StartedAfter $startedAt -PreviousWriteTime $previousWriteTime
         Write-Host "Token saved to $TokenPath (decryptable only by $ServiceAccount on $env:COMPUTERNAME)." -ForegroundColor Green
     }
     finally {
