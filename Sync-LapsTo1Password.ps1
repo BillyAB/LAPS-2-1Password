@@ -480,7 +480,8 @@ try {
     Write-Log "Found $($computers.Count) LAPS-managed computers in AD"
 
     $listJson = Invoke-Op @('item', 'list', '--vault', $vault.id, '--tags', $Tag, '--format', 'json')
-    $items = @(if ($listJson.Trim()) { $listJson | ConvertFrom-Json })
+    # Windows PowerShell 5.1's ConvertFrom-Json emits a JSON array as one object; ForEach-Object unrolls it.
+    $items = @(if ($listJson.Trim()) { $listJson | ConvertFrom-Json | ForEach-Object { $_ } })
     $itemsById = @{}
     $itemsByTitle = @{}
     foreach ($item in $items) {
