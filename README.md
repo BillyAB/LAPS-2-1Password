@@ -112,6 +112,10 @@ Use a sync interval shorter than your shortest LAPS password age. That way a pas
 
 ## Parameters
 
+Full help for either script is available with `Get-Help .\<script>.ps1 -Full`.
+
+### Sync-LapsTo1Password.ps1
+
 | Parameter | Default | Purpose |
 |---|---|---|
 | `-VaultName` | (required) | Vault name or ID |
@@ -119,15 +123,39 @@ Use a sync interval shorter than your shortest LAPS password age. That way a pas
 | `-Server` | Auto | Domain controller to use |
 | `-LdapFilter` | Computers with a Windows or legacy LAPS expiry | Narrows which computers are synced |
 | `-Tag` | `LAPS` | Tag on managed items. Only tagged items are matched or archived |
-| `-MaxHistory` | `50` | History entries kept per item |
+| `-MaxHistory` | `50` | History entries kept per item (0 to 500) |
 | `-DefaultAccountName` | `Administrator` | Username for legacy LAPS, which does not report the account |
 | `-ArchiveOrphans` | Off | Archive tagged items whose computer is no longer in the AD search |
 | `-Force` | Off | Re-sync every computer, and allow archiving more than 25% of items in one run |
-| `-OpPath` | Auto | Path to `op.exe` |
-| `-StatePath`, `-LogDirectory`, `-TokenPath` | Under `C:\ProgramData\LapsTo1Password` | File locations |
+| `-OpPath` | Auto | Path to `op.exe`. Searched for on `PATH`, then in `C:\Program Files\1Password CLI`, then in the WinGet links folder |
+| `-StatePath` | `C:\ProgramData\LapsTo1Password\state.json` | Which password version was last synced per computer. Holds item IDs and timestamps only |
+| `-LogDirectory` | `C:\ProgramData\LapsTo1Password\Logs` | Folder for daily log files |
 | `-LogRetentionDays` | `30` | Daily log files older than this are deleted |
+| `-TokenPath` | `C:\ProgramData\LapsTo1Password\op-token.xml` | DPAPI-encrypted service account token. Ignored when `OP_SERVICE_ACCOUNT_TOKEN` is set |
+| `-SaveToken` | Off | Prompt for the token and save it to `-TokenPath` instead of syncing |
+| `-TokenFile` | None | With `-SaveToken`, read the token from this file instead of prompting (used by the install script) |
+
+It also supports `-WhatIf` (read everything, write nothing) and `-Verbose` (log unchanged computers too).
 
 Exit codes: `0` success, `1` some computers failed (see the log), `2` the run aborted.
+
+### Install-LapsTo1Password.ps1
+
+| Parameter | Default | Purpose |
+|---|---|---|
+| `-ServiceAccount` | (required) | Account the task runs as, as `DOMAIN\name`. A name ending in `$` is treated as a gMSA |
+| `-Credential` | Prompted | Password for a standard service account. Not used for a gMSA |
+| `-VaultName` | (required, except with `-TokenOnly`) | Passed to the sync script |
+| `-SearchBase` | Domain root | Passed to the sync script |
+| `-Server` | Auto | Passed to the sync script |
+| `-ArchiveOrphans` | Off | Passed to the sync script |
+| `-ExtraArguments` | None | Any other sync script parameters, added to the task's command as written. Use single quotes inside it |
+| `-IntervalMinutes` | `30` | How often the sync task runs (5 to 1440) |
+| `-ScriptPath` | `Sync-LapsTo1Password.ps1` next to the install script | Sync script the task runs. Keep it in a folder only administrators can write to |
+| `-TaskName` | `Sync LAPS to 1Password` | Name of the recurring sync task |
+| `-SkipToken` | Off | Only register or update the sync task |
+| `-TokenOnly` | Off | Only save the token. Use it to rotate the token |
+| `-StartTask` | Off | Start the sync task once it is registered |
 
 ## How it works and how it stays within rate limits
 

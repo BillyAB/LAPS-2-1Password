@@ -58,6 +58,26 @@
     Re-sync every computer even if the state file says it is up to date. With -ArchiveOrphans,
     also allows archiving more than 25% of the vault's tagged items in one run.
 
+.PARAMETER OpPath
+    Full path to op.exe (the 1Password CLI). By default it is found on PATH, then in
+    C:\Program Files\1Password CLI, then in the WinGet links folder.
+
+.PARAMETER StatePath
+    File recording which LAPS password version has been synced for each computer, so unchanged
+    computers cost no 1Password API calls. It holds only item IDs and timestamps, never passwords.
+    Deleting it makes the next run re-sync every computer.
+
+.PARAMETER LogDirectory
+    Folder for the daily log files (LapsTo1Password_yyyy-MM-dd.log). Passwords are never logged.
+
+.PARAMETER LogRetentionDays
+    Log files older than this many days are deleted at the start of each run.
+
+.PARAMETER TokenPath
+    File holding the 1Password service account token, encrypted with DPAPI so that only the
+    account that saved it, on this computer, can read it. -SaveToken writes it; a sync reads it
+    unless the OP_SERVICE_ACCOUNT_TOKEN environment variable is set.
+
 .PARAMETER SaveToken
     Prompt for the 1Password service account token and save it, encrypted with DPAPI, to
     -TokenPath. Run this once, as the account that will run the scheduled task.
